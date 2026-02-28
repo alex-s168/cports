@@ -1,0 +1,20 @@
+--- a/Makefile	2026-07-10 14:44:25.998761687 +0200
++++ a/Makefile	2026-07-10 14:44:41.642711132 +0200
+@@ -162,7 +162,7 @@
+ CFLAGS+=$(call cc-disable-warning, gnu-variable-sized-type-not-at-end)
+ export RUSTFLAGS:=$(RUSTFLAGS) -C default-linker-libraries
+ 
+-PKGCONFIG_LIBS="blkid uuid liburcu libsodium zlib liblz4 libzstd libudev libkeyutils libunwind"
++PKGCONFIG_LIBS="blkid uuid liburcu libsodium zlib liblz4 libzstd libudev libkeyutils"
+ CFLAGS+=-DBCACHEFS_FUSE
+ 
+ # Only query pkg-config for targets that compile or do a full install.
+@@ -174,7 +174,7 @@
+ ifeq (,$(PKGCONFIG_CFLAGS))
+     $(error pkg-config error, command: $(PKG_CONFIG) --cflags $(PKGCONFIG_LIBS))
+ endif
+-PKGCONFIG_LDLIBS:=$(shell $(PKG_CONFIG) --libs   $(PKGCONFIG_LIBS))
++PKGCONFIG_LDLIBS:=$(shell $(PKG_CONFIG) --libs   $(PKGCONFIG_LIBS)) -lunwind
+ ifeq (,$(PKGCONFIG_LDLIBS))
+     $(error pkg-config error, command: $(PKG_CONFIG) --libs $(PKGCONFIG_LIBS))
+ endif
