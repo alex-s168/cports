@@ -1,6 +1,6 @@
 pkgname = "nginx"
 pkgver = "1.30.3"
-pkgrel = 0
+pkgrel = 2
 build_style = "configure"
 configure_args = [
     "--prefix=/var/lib/nginx",
@@ -137,6 +137,9 @@ def post_install(self):
     # these are unnecessary with apk backups
     self.uninstall("etc/nginx/*.default", glob=True)
 
+    for f in ["LICENSE", "Makefile", "README.md", "SECURITY.md", "auto", "conf", "configure", "contrib", "html", "src", "objs"]:
+        self.install_files(f, "usr/src/nginx")
+
 
 def _module(modn, eiif):
     @subpackage(f"nginx-module-{modn}")
@@ -181,3 +184,10 @@ for _modn, _iif in [
     ("stream", None),
 ]:
     _module(_modn, _iif)
+
+
+@subpackage("nginx-src")
+def _(self):
+    self.subdesc = "source"
+
+    return ["usr/src"]
