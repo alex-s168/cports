@@ -1,0 +1,48 @@
+--- cvc4-src/src/expr/mkexpr	2026-07-20 21:17:11.517223676 +0200
++++ cvc4-patch/src/expr/mkexpr	2026-07-20 21:17:11.606067798 +0200
+@@ -305,11 +305,7 @@
+     typerules \
+     construles \
+     ; do
+-  eval text="\${text//\\\$\\{$var\\}/\${$var}}"
++  export "$var"
++  text=$(python3 /builddir/cvc4-1.8/subst_helper.py "$var" <<< "$text")
+ done
+-error=`expr "$text" : '.*\${\([^}]*\)}.*'`
+-if [ -n "$error" ]; then
+-  echo "$template:0: error: undefined replacement \${$error}" >&2
+-  exit 1
+-fi
+ echo "$text"
+--- cvc4-src/src/expr/mkmetakind	2026-07-20 21:17:11.517223676 +0200
++++ cvc4-patch/src/expr/mkmetakind	2026-07-20 21:17:11.606125666 +0200
+@@ -416,11 +416,7 @@
+     metakind_operatorKinds \
+     template \
+     ; do
+-  eval text="\${text//\\\$\\{$var\\}/\${$var}}"
++  export "$var"
++  text=$(python3 /builddir/cvc4-1.8/subst_helper.py "$var" <<< "$text")
+ done
+-error=`expr "$text" : '.*\${\([^}]*\)}.*'`
+-if [ -n "$error" ]; then
+-  echo "$template:0: error: undefined replacement \${$error}" >&2
+-  exit 1
+-fi
+ echo "$text"
+--- cvc4-src/src/expr/mkkind	2026-07-20 21:17:11.517223676 +0200
++++ cvc4-patch/src/expr/mkkind	2026-07-20 21:17:11.606168617 +0200
+@@ -411,11 +411,7 @@
+     type_properties_includes \
+     template \
+     ; do
+-  eval text="\${text//\\\$\\{$var\\}/\${$var}}"
++  export "$var"
++  text=$(python3 /builddir/cvc4-1.8/subst_helper.py "$var" <<< "$text")
+ done
+-error=`expr "$text" : '.*\${\([^}]*\)}.*'`
+-if [ -n "$error" ]; then
+-  echo "$template:0: error: undefined replacement \${$error}" >&2
+-  exit 1
+-fi
+ echo "$text"

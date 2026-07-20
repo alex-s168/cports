@@ -1,0 +1,32 @@
+--- a/src/options/CMakeLists.txt
++++ b/src/options/CMakeLists.txt
+@@ -1,7 +1,7 @@
+ # Check if the toml Python module is installed.
+ execute_process(
+   COMMAND
+-  ${PYTHON_EXECUTABLE} -c "import toml"
++  ${PYTHON_EXECUTABLE} -c "import tomllib"
+   RESULT_VARIABLE
+     RET_TOML
+   ERROR_QUIET
+--- a/src/options/mkoptions.py
++++ b/src/options/mkoptions.py
+@@ -46,7 +46,7 @@
+ import re
+ import sys
+ import textwrap
+-import toml
++import tomllib
+ 
+ ### Allowed attributes for module/option/alias
+ 
+@@ -1309,7 +1309,8 @@
+     # Parse files, check attributes and create module/option objects
+     modules = []
+     for filename in filenames:
+-        module = parse_module(filename, toml.load(filename))
++        with open(filename, 'rb') as _f:
++            module = parse_module(filename, tomllib.load(_f))
+ 
+         # Check if long options are valid and unique.  First populate
+         # g_long_cache with option.long and --no- alternatives if
