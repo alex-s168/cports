@@ -27,9 +27,15 @@ def set_failed(pkg):
         pkg_failed = pkg
 
 
-def _remove_ro(f, path, _):
+def _remove_ro(f, path, exc):
     os.chmod(path, stat.S_IWRITE)
-    f(path)
+    try:
+        os.unlink(path)
+    except OSError:
+        try:
+            os.rmdir(path)
+        except OSError:
+            pass
 
 
 def remove_pkg_wrksrc(pkg):
