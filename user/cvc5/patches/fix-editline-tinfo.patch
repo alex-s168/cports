@@ -1,0 +1,24 @@
+Remove hardcoded -ltinfo from editline library search.
+Chimera's ncurses does not provide a separate libtinfo, so
+drop the non-Darwin block that blindly adds -ltinfo (and -lbsd).
+pkg-config on libedit already provides the correct link flags.
+
+--- a/cmake/FindEditline.cmake
++++ b/cmake/FindEditline.cmake
+@@ -18,16 +18,6 @@
+ find_package(PkgConfig REQUIRED)
+ pkg_check_modules(Editline REQUIRED libedit)
+ 
+-if(Editline_INCLUDE_DIRS)
+-  if(NOT CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+-    find_library(BSD_LIBRARIES NAMES bsd)
+-    if (BSD_LIBRARIES)
+-      set(Editline_LIBRARIES ${Editline_LIBRARIES} bsd)
+-    endif()
+-    set(Editline_LIBRARIES ${Editline_LIBRARIES} tinfo)
+-  endif()
+-endif()
+-
+ include(FindPackageHandleStandardArgs)
+ find_package_handle_standard_args(Editline
+   DEFAULT_MSG Editline_INCLUDE_DIRS Editline_LIBRARIES)
