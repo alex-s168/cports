@@ -1,0 +1,17 @@
+OCaml 5.x headers use C11 atomic builtins (atomic_load_acquire,
+atomic_store_release) as compiler builtins without a declaration in C99 mode.
+Suppress the implicit-function-declaration diagnostic so the builtins are
+accepted; they resolve at link time via the compiler runtime.
+
+--- a/src/dune
++++ b/src/dune
+@@ -6,6 +6,7 @@
+  (foreign_stubs
+   (language c)
+   (names mlmpfr_stubs)
+-  (flags
+-   (:include c_flags.sexp)))
++  (flags
++   (:include c_flags.sexp)
++   -Wno-implicit-function-declaration))
+  (c_library_flags

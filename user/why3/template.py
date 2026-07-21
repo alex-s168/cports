@@ -1,6 +1,6 @@
 pkgname = "why3"
 pkgver = "1.8.2"
-pkgrel = 0
+pkgrel = 1
 build_style = "gnu_configure"
 configure_args = [
     "--disable-frama-c",
@@ -10,16 +10,17 @@ configure_args = [
     "--disable-ide",
     "--disable-web-ide",
     "--disable-mpfr",
-    "--disable-hypothesis-selection",
-    "--disable-stackify",
-    "--disable-re",
     "--disable-sexp",
+    "--enable-bddinfer",
 ]
 configure_gen = []
 make_dir = "."
 # menhirLib is at /usr/lib/menhirLib/ but ocamlfind searches in
 # /usr/lib/ocaml/. Tell ocamlfind where to find it.
-env = {"OCAMLPATH": "/usr/lib"}
+env = {
+    "OCAMLPATH": "/usr/lib",
+    "CAML_LD_LIBRARY_PATH": "/usr/lib/ocaml/stublibs",
+}
 
 hostmakedepends = [
     "menhir",
@@ -28,10 +29,15 @@ hostmakedepends = [
     "pkgconf",
 ]
 makedepends = [
+    "apron",
+    "camlidl",
     "camlzip",
     "gmp-devel",
     "menhir-lib",
+    "mpfr-devel",
     "ocaml-compiler-libs",
+    "ocaml-re",
+    "ocamlgraph",
     "zarith",
     "zlib-ng-compat-devel",
 ]
@@ -56,7 +62,7 @@ def check(self):
 def install(self):
     destdir = str(self.chroot_destdir)
     self.make.install()
-    # Build and install the OCaml library
+    # Build and install the OCaml bytecode library
     self.do("make", "byte")
     self.do("make", "install-lib", "DESTDIR=" + destdir)
 
