@@ -1,0 +1,24 @@
+--- a/setup.py
++++ b/setup.py
+@@ -23,7 +23,7 @@
+ max_python_version = "3.15"  # exclusive
+ min_numpy_build_version = "2.0.0rc1"
+ min_numpy_run_version = "1.22"
+-max_numpy_run_version = "2.5"
++max_numpy_run_version = "2.6"
+ min_llvmlite_version = "0.48.0dev0"
+ max_llvmlite_version = "0.49"
+ 
+--- a/numba/__init__.py
++++ b/numba/__init__.py
+@@ -39,8 +39,8 @@
+                f"{numpy_version[0]}.{numpy_version[1]}.")
+         raise ImportError(msg)
+ 
+-    if numpy_version > (2, 4):
+-        msg = (f"Numba needs NumPy 2.4 or less. Got NumPy "
++    if numpy_version >= (2, 6):
++        msg = (f"Numba needs NumPy 2.5 or less. Got NumPy "
+                f"{numpy_version[0]}.{numpy_version[1]}.")
+         raise ImportError(msg)
+ 

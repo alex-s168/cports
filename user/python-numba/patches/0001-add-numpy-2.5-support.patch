@@ -1,0 +1,714 @@
+Subject: [PATCH] add NumPy 2.5 support
+
+Backport the compatibility changes from upstream Numba PR #10645
+(commit f16e5c9dda74812789c9cdd6aa8416d04fe1f164). The upstream PR is
+not merged yet; this local package intentionally tests that work against
+the repository's NumPy 2.5 package.
+
+diff --git a/numba/np/arraymath.py b/numba/np/arraymath.py
+index c68ae313b..271686050 100644
+--- a/numba/np/arraymath.py
++++ b/numba/np/arraymath.py
+@@ -4927,6 +4927,12 @@ def np_cross(a, b):
+                 "(dimension must be 2 or 3)"
+             ))
+ 
++        if numpy_version >= (2, 5):
++            if a_.shape[-1] == 2 or b_.shape[-1] == 2:
++                raise ValueError(
++                    f"Both input arrays must be (arrays of) 3-dimensional"
++                    f" vectors, but they are {a_.shape[-1]} and "
++                    f"{b_.shape[-1]} dimensional instead.")
+         if a_.shape[-1] == 3 or b_.shape[-1] == 3:
+             return _cross(a_, b_)
+         else:
+@@ -4938,46 +4944,45 @@ def np_cross(a, b):
+     return impl
+ 
+ 
+-@register_jitable
+-def _cross2d_operation(a, b):
+-
+-    def _cross_preprocessing(x):
+-        x0 = x[..., 0]
+-        x1 = x[..., 1]
+-        return x0, x1
+-
+-    a0, a1 = _cross_preprocessing(a)
+-    b0, b1 = _cross_preprocessing(b)
++if numpy_version < (2, 5):
++    @register_jitable
++    def _cross2d_operation(a, b):
+ 
+-    cp = np.multiply(a0, b1) - np.multiply(a1, b0)
+-    # If ndim of a and b is 1, cp is a scalar.
+-    # In this case np.cross returns a 0-D array, containing the scalar.
+-    # np.asarray is used to reconcile this case, without introducing
+-    # overhead in the case where cp is an actual N-D array.
+-    # (recall that np.asarray does not copy existing arrays)
+-    return np.asarray(cp)
++        def _cross_preprocessing(x):
++            x0 = x[..., 0]
++            x1 = x[..., 1]
++            return x0, x1
+ 
++        a0, a1 = _cross_preprocessing(a)
++        b0, b1 = _cross_preprocessing(b)
+ 
+-def cross2d(a, b):
+-    pass
++        cp = np.multiply(a0, b1) - np.multiply(a1, b0)
++        # If ndim of a and b is 1, cp is a scalar.
++        # In this case np.cross returns a 0-D array, containing the scalar.
++        # np.asarray is used to reconcile this case, without introducing
++        # overhead in the case where cp is an actual N-D array.
++        # (recall that np.asarray does not copy existing arrays)
++        return np.asarray(cp)
+ 
++    def cross2d(a, b):
++        pass
+ 
+-@overload(cross2d)
+-def cross2d_impl(a, b):
+-    if not type_can_asarray(a) or not type_can_asarray(b):
+-        raise TypingError("Inputs must be array-like.")
++    @overload(cross2d)
++    def cross2d_impl(a, b):
++        if not type_can_asarray(a) or not type_can_asarray(b):
++            raise TypingError("Inputs must be array-like.")
+ 
+-    def impl(a, b):
+-        a_ = np.asarray(a)
+-        b_ = np.asarray(b)
+-        if a_.shape[-1] != 2 or b_.shape[-1] != 2:
+-            raise ValueError((
+-                "Incompatible dimensions for 2D cross product\n"
+-                "(dimension must be 2 for both inputs)"
+-            ))
+-        return _cross2d_operation(a_, b_)
++        def impl(a, b):
++            a_ = np.asarray(a)
++            b_ = np.asarray(b)
++            if a_.shape[-1] != 2 or b_.shape[-1] != 2:
++                raise ValueError((
++                    "Incompatible dimensions for 2D cross product\n"
++                    "(dimension must be 2 for both inputs)"
++                ))
++            return _cross2d_operation(a_, b_)
+ 
+-    return impl
++        return impl
+ 
+ 
+ @overload(np.trim_zeros)
+diff --git a/numba/np/arrayobj.py b/numba/np/arrayobj.py
+index ae81627ec..ebaf1d8bc 100644
+--- a/numba/np/arrayobj.py
++++ b/numba/np/arrayobj.py
+@@ -6639,7 +6639,8 @@ def impl_np_vstack(tup):
+         return impl
+ 
+ 
+-if numpy_version >= (2, 0):
++if numpy_version >= (2, 0) and numpy_version < (2, 5):
++    # Numpy 2.5 removed np.row_stack, so only test it if it's present.
+     overload(np.row_stack)(impl_np_vstack)
+ 
+ 
+diff --git a/numba/np/extensions.py b/numba/np/extensions.py
+index e0051a1fc..e7806ad81 100644
+--- a/numba/np/extensions.py
++++ b/numba/np/extensions.py
+@@ -1,10 +1,11 @@
+ """
+ NumPy extensions.
+ """
++from numba.np.numpy_support import numpy_version
+ 
+-from numba.np.arraymath import cross2d
++if numpy_version < (2, 5):
++    from numba.np.arraymath import cross2d
+ 
+-
+-__all__ = [
+-    'cross2d'
+-]
++    __all__ = [
++        'cross2d'
++    ]
+diff --git a/numba/np/linalg.py b/numba/np/linalg.py
+index d26ba1e07..637c8bd0f 100644
+--- a/numba/np/linalg.py
++++ b/numba/np/linalg.py
+@@ -1031,6 +1031,12 @@ def eig_impl(a):
+     JOBVL = ord('N')
+     JOBVR = ord('V')
+ 
++    # NumPy >= 2.5 always returns complex from eig for real input.
++    _eig_always_complex = np_support.numpy_version >= (2, 5)
++    _eig_real_ty = getattr(a.dtype, "underlying_float", a.dtype)
++    _eig_cmplx_dtype = np_support.as_dtype(
++        getattr(types, f"complex{2 * _eig_real_ty.bitwidth}"))
++
+     def real_eig_impl(a):
+         """
+         eig() implementation for real arrays.
+@@ -1052,7 +1058,12 @@ def eig_impl(a):
+         vr = np.empty((n, ldvr), dtype=a.dtype)
+ 
+         if n == 0:
+-            return (wr, vr.T)
++            if _eig_always_complex:
++                w = np.empty(n, dtype=_eig_cmplx_dtype)
++                v = np.empty((n, n), dtype=_eig_cmplx_dtype)
++                return (w, v.T)
++            else:
++                return (wr, vr.T)
+ 
+         r = numba_ez_rgeev(kind,
+                             JOBVL,
+@@ -1066,8 +1077,40 @@ def eig_impl(a):
+                             ldvl,
+                             vr.ctypes,
+                             ldvr)
++
+         _handle_err_maybe_convergence_problem(r)
+ 
++        if _eig_always_complex:
++            # Unpack real LAPACK wr/wi and vr into complex eigenvalues/vectors.
++            # Conjugate pairs: LAPACK stores Re/Im parts in consecutive columns.
++            # vr rows hold eigenvectors (same layout as the real-output path).
++            w = np.empty(n, dtype=_eig_cmplx_dtype)
++            v = np.empty((n, n), dtype=_eig_cmplx_dtype)
++            i = 0
++            while i < n:
++                if wi[i] == 0.0:
++                    w[i] = complex(wr[i], wi[i])
++                    for j in range(n):
++                        v[i, j] = complex(vr[i, j], 0.0)
++                    i += 1
++                else:
++                    w[i] = complex(wr[i], wi[i])
++                    w[i + 1] = complex(wr[i + 1], wi[i + 1])
++                    for j in range(n):
++                        re = vr[i, j]
++                        im = vr[i + 1, j]
++                        v.real[i, j] = re
++                        v.imag[i, j] = im
++                        v.real[i + 1, j] = re
++                        v.imag[i + 1, j] = -im
++                    i += 2
++
++            # put these in to help with liveness analysis,
++            # `.ctypes` doesn't keep the vars alive
++            _dummy_liveness_func([acpy.size, vl.size, vr.size, wr.size,
++                                  wi.size, w.size, v.size])
++            return (w, v.T)
++
+         # By design numba does not support dynamic return types, however,
+         # Numpy does. Numpy uses this ability in the case of returning
+         # eigenvalues/vectors of a real matrix. The return type of
+@@ -1085,6 +1128,7 @@ def eig_impl(a):
+         # put these in to help with liveness analysis,
+         # `.ctypes` doesn't keep the vars alive
+         _dummy_liveness_func([acpy.size, vl.size, vr.size, wr.size, wi.size])
++
+         return (wr, vr.T)
+ 
+     def cmplx_eig_impl(a):
+@@ -1146,6 +1190,12 @@ def eigvals_impl(a):
+     JOBVL = ord('N')
+     JOBVR = ord('N')
+ 
++    # NumPy >= 2.5 always returns complex from eigvals for real input.
++    _eigvals_always_complex = np_support.numpy_version >= (2, 5)
++    _eigvals_real_ty = getattr(a.dtype, "underlying_float", a.dtype)
++    _eigvals_cmplx_dtype = np_support.as_dtype(
++        getattr(types, f"complex{2 * _eigvals_real_ty.bitwidth}"))
++
+     def real_eigvals_impl(a):
+         """
+         eigvals() implementation for real arrays.
+@@ -1164,7 +1214,10 @@ def eigvals_impl(a):
+         wr = np.empty(n, dtype=a.dtype)
+ 
+         if n == 0:
+-            return wr
++            if _eigvals_always_complex:
++                return np.empty(n, dtype=_eigvals_cmplx_dtype)
++            else:
++                return wr
+ 
+         wi = np.empty(n, dtype=a.dtype)
+ 
+@@ -1186,6 +1239,17 @@ def eigvals_impl(a):
+                             ldvr)
+         _handle_err_maybe_convergence_problem(r)
+ 
++        if _eigvals_always_complex:
++            w = np.empty(n, dtype=_eigvals_cmplx_dtype)
++            for i in range(n):
++                w[i] = complex(wr[i], wi[i])
++
++            # put these in to help with liveness analysis,
++            # `.ctypes` doesn't keep the vars alive
++            _dummy_liveness_func([acpy.size, vl.size, vr.size, wr.size,
++                                  wi.size, w.size])
++            return w
++
+         # By design numba does not support dynamic return types, however,
+         # Numpy does. Numpy uses this ability in the case of returning
+         # eigenvalues/vectors of a real matrix. The return type of
+diff --git a/numba/np/npdatetime.py b/numba/np/npdatetime.py
+index 3e609c2c6..de6c4df16 100644
+--- a/numba/np/npdatetime.py
++++ b/numba/np/npdatetime.py
+@@ -178,6 +178,9 @@ def timedelta_sign_impl(context, builder, sig, args):
+                 with lt_zero:
+                     builder.store(Constant(TIMEDELTA64, -1), ret)
+     res = builder.load(ret)
++    if sig.return_type == types.float64:
++        res = builder.sitofp(res, context.get_value_type(sig.return_type))
++        res = builder.select(builder.icmp_unsigned('==', val, NAT), Constant(res.type, float('nan')), res)
+     return impl_ret_untracked(context, builder, sig.return_type, res)
+ 
+ 
+diff --git a/numba/np/npdatetime_helpers.py b/numba/np/npdatetime_helpers.py
+index 4abb671b9..f1b325953 100644
+--- a/numba/np/npdatetime_helpers.py
++++ b/numba/np/npdatetime_helpers.py
+@@ -26,7 +26,7 @@ DATETIME_UNITS = {
+     '': 14,   # "generic", i.e. unit-less
+ }
+ 
+-NAT = np.timedelta64('nat').astype(np.int64)
++NAT = np.timedelta64('nat', 's').astype(np.int64)
+ 
+ # NOTE: numpy has several inconsistent functions for timedelta casting:
+ # - can_cast_timedelta64_{metadata,units}() disallows "safe" casting
+diff --git a/numba/np/polynomial/polynomial_functions.py b/numba/np/polynomial/polynomial_functions.py
+index 4a13f8cf0..5300586d7 100644
+--- a/numba/np/polynomial/polynomial_functions.py
++++ b/numba/np/polynomial/polynomial_functions.py
+@@ -24,6 +24,8 @@ def roots_impl(p):
+     else:
+         cast_t = as_dtype(ty)
+ 
++    real_output = not isinstance(ty, types.Complex)
++
+     def roots_impl(p):
+         # impl based on numpy:
+         # https://github.com/numpy/numpy/blob/master/numpy/lib/polynomial.py
+@@ -49,6 +51,17 @@ def roots_impl(p):
+             A = np.diag(np.ones((n - 2,), cast_t), 1).T
+             A[0, :] = -p[1:] / p[0]  # normalize
+             roots = np.linalg.eigvals(A)
++            # roots assumed eigvals would only return real values for real
++            # input; domain-change raises were handled inside eigvals. From
++            # NumPy 2.5 on, eigvals always returns complex, so roots must
++            # check for a nonzero imag part and raise if needed, then drop
++            # the zero imag parts. Branch pruned for complex input.
++            if real_output:
++                if np.any(roots.imag):
++                    raise ValueError(
++                        "a real domain argument to roots cannot produce "
++                        "a complex domain result")
++                roots = roots.real.copy()
+         else:
+             roots = np.zeros(0, dtype=cast_t)
+ 
+diff --git a/numba/np/ufunc_db.py b/numba/np/ufunc_db.py
+index a72642432..bf1471ba3 100644
+--- a/numba/np/ufunc_db.py
++++ b/numba/np/ufunc_db.py
+@@ -1124,9 +1124,14 @@ def _fill_ufunc_db(ufunc_db):
+     ufunc_db[np.absolute].update({
+         'm->m': npdatetime.timedelta_abs_impl,
+     })
+-    ufunc_db[np.sign].update({
+-        'm->m': npdatetime.timedelta_sign_impl,
+-    })
++    if numpy_version >= (2, 5):
++        ufunc_db[np.sign].update({
++            'm->d': npdatetime.timedelta_sign_impl,
++        })
++    else:
++        ufunc_db[np.sign].update({
++            'm->m': npdatetime.timedelta_sign_impl,
++        })
+     ufunc_db[np.add].update({
+         'mm->m': npdatetime.timedelta_add_impl,
+         'Mm->M': npdatetime.datetime_plus_timedelta,
+diff --git a/numba/tests/test_dyn_array.py b/numba/tests/test_dyn_array.py
+index 99328052c..80c9a60b4 100644
+--- a/numba/tests/test_dyn_array.py
++++ b/numba/tests/test_dyn_array.py
+@@ -11,6 +11,7 @@ from numba import njit
+ from numba.core import types, utils, config
+ from numba.tests.support import MemoryLeakMixin, TestCase, tag, skip_if_32bit
+ from numba.core.utils import PYVERSION
++from numba.np.numpy_support import numpy_version
+ import unittest
+ 
+ 
+@@ -1774,7 +1775,10 @@ class TestNpStack(MemoryLeakMixin, TestCase):
+         # Since np.row_stack is an alias for np.vstack, it does not need a
+         # separate Numba implementation. For every test for np.vstack, the same
+         # test for np.row_stack has been added.
+-        functions = [np_vstack, np_row_stack]
++        functions = [np_vstack]
++        if numpy_version < (2, 5):
++            # Numpy 2.5 removed np.row_stack, so only test it if it's present.
++            functions.append(np_row_stack)
+         for pyfunc in functions:
+             cfunc = nrtjit(pyfunc)
+ 
+diff --git a/numba/tests/test_linalg.py b/numba/tests/test_linalg.py
+index 2eb80ae08..b057fccf3 100644
+--- a/numba/tests/test_linalg.py
++++ b/numba/tests/test_linalg.py
+@@ -10,6 +10,7 @@ import numpy as np
+ 
+ from numba import jit, njit, typeof
+ from numba.core import errors
++from numba.np.numpy_support import numpy_version
+ from numba.tests.support import (TestCase, tag, needs_lapack, needs_blas,
+                                  _is_armv7l, EnableNRTStatsMixin)
+ from .matmul_usecase import matmul_usecase
+@@ -1056,9 +1057,41 @@ class TestLinalgEigenSystems(TestLinalgBase):
+             l, _ = func(A)
+             self.assertTrue(np.any(l.imag))
+ 
+-            # Now check that the computation fails in real space
++            # Behaviour in real space depends on the NumPy version.
+             for ty in [np.float32, np.float64]:
+-                self.assert_no_domain_change(name, cfunc, (A.astype(ty),))
++                if numpy_version < (2, 5):
++                    # Returning complex eigenvalues from a real input is a
++                    # domain change numba cannot represent, so it raises.
++                    self.assert_no_domain_change(name, cfunc, (A.astype(ty),))
++                else:
++                    # NumPy >= 2.5 always returns complex eigenvalues for real
++                    # input, so numba now computes the result instead of
++                    # raising (matching NumPy).
++                    check(A.astype(ty))
++                    # Values and imag sign bits must match NumPy for both unpack
++                    # branches: real eigenvalues (wi == 0) and conjugate
++                    # pairs (wi != 0). The 4x4 is structuring of the two
++                    # 2x2 cases, so we hit both unpack branches.
++                    for az in (
++                        np.array([[1., 2.], [2., 1.]], dtype=ty),
++                        np.array([[1., -1.], [1., 1.]], dtype=ty),
++                        np.array([[1., 2., 0., 0.],
++                                  [2., 1., 0., 0.],
++                                  [0., 0., 1., -1.],
++                                  [0., 0., 1., 1.]], dtype=ty),
++                    ):
++                        check(az)
++                        expected = func(az)
++                        got = cfunc(az)
++                        if expected_res_len == 2:
++                            for k in range(2):
++                                np.testing.assert_array_equal(
++                                    np.signbit(got[k].imag),
++                                    np.signbit(expected[k].imag))
++                        else:
++                            np.testing.assert_array_equal(
++                                np.signbit(got.imag),
++                                np.signbit(expected.imag))
+ 
+     @needs_lapack
+     def test_linalg_eig(self):
+diff --git a/numba/tests/test_np_functions.py b/numba/tests/test_np_functions.py
+index 8d0fbd142..d74178c92 100644
+--- a/numba/tests/test_np_functions.py
++++ b/numba/tests/test_np_functions.py
+@@ -17,7 +17,6 @@ from numba.np.numpy_support import numpy_version
+ from numba.core.errors import (TypingError, NumbaDeprecationWarning)
+ from numba.core.config import IS_32BITS
+ from numba.core.utils import pysignature
+-from numba.np.extensions import cross2d
+ from numba.tests.support import (TestCase, MemoryLeakMixin,
+                                  needs_blas, run_in_subprocess,
+                                  skip_if_numpy_2, IS_NUMPY_2,
+@@ -434,10 +433,6 @@ def np_trim_zeros(a, trim='fb'):
+     return np.trim_zeros(a, trim)
+ 
+ 
+-def nb_cross2d(a, b):
+-    return cross2d(a, b)
+-
+-
+ def flip_lr(a):
+     return np.fliplr(a)
+ 
+@@ -1537,8 +1532,11 @@ class TestNPFunctions(MemoryLeakMixin, TestCase):
+             a = self.rnd.choice(element_pool, sample_size)
+             v = self.rnd.choice(element_pool, sample_size + (i % 3 - 1))
+ 
+-            # output should match numpy regardless of whether `a` is sorted
+-            check(a, v)
++            if numpy_version < (2, 5):
++                # Output should match numpy regardless of whether `a`
++                # is sorted but numpy 2.5+ has a different searchsorted
++                # implementation that gives different results for unsorted `a`.
++                check(a, v)
+             check(np.sort(a), v)
+ 
+         ones = np.ones(5)
+@@ -1616,12 +1614,19 @@ class TestNPFunctions(MemoryLeakMixin, TestCase):
+             a = self.rnd.choice(element_pool, sample_size)
+             v = self.rnd.choice(element_pool, sample_size + (i % 3 - 1))
+ 
+-            # output should match numpy regardless of whether `a` is sorted
+-            check(a, v)
++            if numpy_version < (2, 5):
++                # Output should match numpy regardless of whether `a`
++                # is sorted but NumPy 2.5+ has a different searchsorted
++                # implementation that gives different results for
++                # unsorted `a`.
++                check(a, v)
+             check(np.sort(a), v)
+ 
+-        # check type promotion (a complex; v not so much)
+-        check(a=np.array(element_pool), v=np.arange(2))
++        if numpy_version < (2, 5):
++            # check type promotion (a complex; v not so much)
++            check(a=np.array(element_pool), v=np.arange(2))
++        else:
++            check(a=np.sort(np.array(element_pool)), v=np.arange(2))
+ 
+     def test_digitize(self):
+         pyfunc = digitize
+@@ -5670,11 +5675,6 @@ class TestNPFunctions(MemoryLeakMixin, TestCase):
+                 np.array([[1, 2, 3], [4, 5, 6]]),
+                 np.array([[4, 5, 6], [1, 2, 3]])
+             ),
+-            # 2x3 array-like (n-dims)
+-            (
+-                np.array([[1, 2, 3], [4, 5, 6]]),
+-                ((4, 5), (1, 2))
+-            ),
+             # 3x3 (1-dim) with type promotion
+             (
+                 np.array([1, 2, 3], dtype=np.int64),
+@@ -5685,11 +5685,6 @@ class TestNPFunctions(MemoryLeakMixin, TestCase):
+                 (1, 2, 3),
+                 (4, 5, 6)
+             ),
+-            # 2x3 (1-dim)
+-            (
+-                np.array([1, 2]),
+-                np.array([4, 5, 6])
+-            ),
+             # 3x3 (with broadcasting 1d x 2d)
+             (
+                 np.array([1, 2, 3]),
+@@ -5700,13 +5695,39 @@ class TestNPFunctions(MemoryLeakMixin, TestCase):
+                 np.array([[1, 2, 3], [4, 5, 6]]),
+                 np.array([1, 2, 3])
+             ),
++        ]
++
++        two_d_pairs = [
++            #  2x3 (1-dim)
++            (
++                np.array([1, 2]),
++                np.array([4, 5, 6])
++            ),
+             # 3x2 (with higher order broadcasting)
+             (
+                 np.arange(36).reshape(6, 2, 3),
+                 np.arange(4).reshape(2, 2)
+-            )
++            ),
++            # 2x3 array-like (n-dims)
++            (
++                np.array([[1, 2, 3], [4, 5, 6]]),
++                ((4, 5), (1, 2))
++            ),
+         ]
+ 
++        if numpy_version < (2, 5):
++            pairs.extend(two_d_pairs)
++        else:
++            self.disable_leak_check()
++            for x, y in two_d_pairs:
++                with self.assertRaises(ValueError) as raises:
++                    cfunc(x, y)
++                x_dim, y_dim = np.array(x).shape[-1], np.array(y).shape[-1]
++                self.assertIn(
++                    f'Both input arrays must be (arrays of) 3-dimensional'
++                    f' vectors, but they are {x_dim} and {y_dim}'
++                    f' dimensional instead.',
++                    str(raises.exception))
+         for x, y in pairs:
+             expected = pyfunc(x, y)
+             got = cfunc(x, y)
+@@ -5734,16 +5755,29 @@ class TestNPFunctions(MemoryLeakMixin, TestCase):
+                 np.array((1, 2)),
+                 np.array((3, 4))
+             )
+-        self.assertIn(
+-            'Dimensions for both inputs is 2.',
+-            str(raises.exception)
+-        )
+-
+-        self.assertIn(
+-            '`cross2d(a, b)` from `numba.np.extensions`.',
+-            str(raises.exception)
+-        )
++        if numpy_version < (2, 5):
++            self.assertIn(
++                'Dimensions for both inputs is 2.',
++                str(raises.exception)
++            )
++        else:
++            self.assertIn(
++                'Both input arrays must be (arrays of) 3-dimensional'
++                ' vectors, but they are 2 and 2 dimensional instead.',
++                str(raises.exception)
++            )
+ 
++        if numpy_version < (2, 5):
++            self.assertIn(
++                '`cross2d(a, b)` from `numba.np.extensions`.',
++                str(raises.exception)
++            )
++        else:
++            self.assertIn(
++                'Both input arrays must be (arrays of) 3-dimensional'
++                ' vectors, but they are 2 and 2 dimensional instead.',
++                str(raises.exception)
++            )
+         # test incompatible dimensions for ndim > 1
+         with self.assertRaises(ValueError) as raises:
+             cfunc(
+@@ -5761,10 +5795,17 @@ class TestNPFunctions(MemoryLeakMixin, TestCase):
+                 np.arange(8).reshape((4, 2)),
+                 np.arange(8)[::-1].reshape((4, 2))
+             )
+-        self.assertIn(
+-            'Dimensions for both inputs is 2',
+-            str(raises.exception)
+-        )
++        if numpy_version < (2, 5):
++            self.assertIn(
++                'Dimensions for both inputs is 2.',
++                str(raises.exception)
++            )
++        else:
++            self.assertIn(
++                'Both input arrays must be (arrays of) 3-dimensional'
++                ' vectors, but they are 2 and 2 dimensional instead.',
++                str(raises.exception)
++            )
+ 
+         # test non-array-like input
+         with self.assertRaises(TypingError) as raises:
+@@ -5777,7 +5818,16 @@ class TestNPFunctions(MemoryLeakMixin, TestCase):
+             str(raises.exception)
+         )
+ 
++    @unittest.skipIf(
++        numpy_version >= (2, 5),
++        "Support for 2D cross product was officially dropped in Numpy 2.5"
++    )
+     def test_cross2d(self):
++        from numba.np.extensions import cross2d
++
++        def nb_cross2d(a, b):
++            return cross2d(a, b)
++
+         pyfunc = np_cross
+         cfunc = njit(nb_cross2d)
+         pairs = [
+@@ -5823,7 +5873,16 @@ class TestNPFunctions(MemoryLeakMixin, TestCase):
+             got = cfunc(x, y)
+             self.assertPreciseEqual(expected, got)
+ 
++    @unittest.skipIf(
++        numpy_version >= (2, 5),
++        "Support for 2D cross product was officially dropped in Numpy 2.5"
++    )
+     def test_cross2d_exceptions(self):
++        from numba.np.extensions import cross2d
++
++        def nb_cross2d(a, b):
++            return cross2d(a, b)
++
+         cfunc = njit(nb_cross2d)
+         self.disable_leak_check()
+ 
+diff --git a/numba/tests/test_npdatetime.py b/numba/tests/test_npdatetime.py
+index c4870cbe9..7563f1ce8 100644
+--- a/numba/tests/test_npdatetime.py
++++ b/numba/tests/test_npdatetime.py
+@@ -335,8 +335,10 @@ class TestTimedeltaArithmetic(TestCase):
+         check(TD(-7), -1.5, TD(10))
+         check(TD('NaT', 'ps'), -1.5, TD('NaT', 'ps'))
+         check(TD(7, 'ps'), float('nan'), TD('NaT', 'ps'))
+-        # wraparound on overflow
+-        check(TD(2**62, 'ps'), 16, TD(0, 'ps'))
++        if numpy_version < (2, 5):
++            # wraparound on overflow, post NumPy 2.5, 
++            # timedelta64s raise on overflow instead.
++            check(TD(2**62, 'ps'), 16, TD(0, 'ps'))
+ 
+     def test_div(self):
+         div = self.jit(div_usecase)
+@@ -836,6 +838,14 @@ class TestDatetimeArithmetic(TestCase):
+             i = all_units.index(a_unit)
+             units = all_units[i:i+6]
+             for unit in units:
++                if numpy_version >= (2, 5):
++                    try:
++                        # Post NumPy 2.5 it is possible for
++                        # astype to raise on overflow, pre 
++                        # 2.5 it wraps around.
++                        b = a.astype('M8[%s]' % unit)
++                    except OverflowError:
++                        continue
+                 # Force conversion
+                 b = a.astype('M8[%s]' % unit)
+                 if (not npdatetime_helpers.same_kind(value_unit(a),
+diff --git a/numba/tests/test_numpy_support.py b/numba/tests/test_numpy_support.py
+index d751e6f5b..46acd9b69 100644
+--- a/numba/tests/test_numpy_support.py
++++ b/numba/tests/test_numpy_support.py
+@@ -83,7 +83,8 @@ class TestFromDtype(TestCase):
+             self.assertEqual(dtype, numpy_support.as_dtype(numba_type))
+ 
+         check('S10', types.CharSeq(10))
+-        check('a11', types.CharSeq(11))
++        if numpy_support.numpy_version < (2, 5):
++            check('a11', types.CharSeq(11))
+         check('U12', types.UnicodeCharSeq(12))
+ 
+     def check_datetime_types(self, letter, nb_class):
+diff --git a/numba/tests/test_polynomial.py b/numba/tests/test_polynomial.py
+index ecc8291f0..63306a6af 100644
+--- a/numba/tests/test_polynomial.py
++++ b/numba/tests/test_polynomial.py
+@@ -6,6 +6,7 @@ from numpy.polynomial import polynomial as poly
+ from numpy.polynomial import polyutils as pu
+ 
+ from numba import jit, njit
++from numba.np.numpy_support import numpy_version
+ from numba.tests.support import (TestCase, needs_lapack,
+                                  EnableNRTStatsMixin, MemoryLeakMixin)
+ from numba.core.errors import TypingError
+@@ -166,7 +167,12 @@ class TestPoly1D(TestPolynomialBase):
+ 
+         # check real input with complex roots raises
+         x = np.array([7., 2., 0., 1.])
+-        self.assert_no_domain_change("eigvals", cfunc, (x,))
++        if numpy_version < (2, 5):
++            self.assert_no_domain_change("eigvals", cfunc, (x,))
++        else:
++            msg = ("a real domain argument to roots cannot produce "
++                   "a complex domain result")
++            self.assert_error(cfunc, (x,), msg)
+         # but works fine if type conv to complex first
+         cfunc(x.astype(np.complex128))
+ 
